@@ -1,3 +1,6 @@
+#  @MrMNTG @MusammilN
+#please give credits https://github.com/MN-BOTS/ShobanaFilterBot
+
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
 import datetime
@@ -83,3 +86,6 @@ async def broadcast(bot, message):
         f"Broadcast Completed in {time_taken}.\n\nTotal Users: {total_users}\n"
         f"Success: {success} | Blocked: {blocked} | Deleted: {deleted} | Failed: {failed}"
     )
+
+#  @MrMNTG @MusammilN
+#please give credits https://github.com/MN-BOTS/ShobanaFilterBot
