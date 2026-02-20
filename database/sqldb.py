@@ -51,6 +51,15 @@ def _fallback_conn() -> sqlite3.Connection:
     return conn
 
 
+
+
+def get_fallback_db_size() -> int:
+    with _fallback_conn() as conn:
+        page_count = conn.execute("PRAGMA page_count").fetchone()[0]
+        page_size = conn.execute("PRAGMA page_size").fetchone()[0]
+        return int(page_count) * int(page_size)
+
+
 def sqldb_enabled() -> bool:
     return bool(SQLDB)
 

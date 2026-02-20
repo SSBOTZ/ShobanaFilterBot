@@ -14,7 +14,7 @@ from info import (
     SPELL_CHECK_REPLY,
     TURSO_MAX_DB_BYTES,
 )
-from database.sqldb import db_execute, db_fetchall, db_fetchone, get_conn, libsql_mode, sqldb_enabled
+from database.sqldb import db_execute, db_fetchall, db_fetchone, get_conn, get_fallback_db_size, libsql_mode, sqldb_enabled
 
 USE_SQLDB = sqldb_enabled()
 USE_LIBSQL = libsql_mode()
@@ -225,10 +225,12 @@ class Database:
         if not self.use_sql:
             return (await self.db.command('dbstats'))['dataSize']
         if self.use_libsql:
-            # Turso/libsql currently doesn't expose dbstats in this project.
-            # Returning None lets callers display the configured plan capacity
-            # without pretending usage is known.
-            return None
+            # When Turso is unreachable and fallback sqlite is active,
+            # report the fallback sqlite usage so /stats remains useful.
+            try:
+                return get_fallback_db_size()
+            except Exception:
+                return None
         with get_conn() as conn:
             page_count = conn.execute("PRAGMA page_count").fetchone()[0]
             page_size = conn.execute("PRAGMA page_size").fetchone()[0]
