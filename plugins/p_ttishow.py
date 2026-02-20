@@ -151,11 +151,14 @@ async def get_stats(bot, message):
         files = await Media.count_documents()
         size = await db.get_db_size()
         db_limit = await db.get_db_limit()
+        backend = await db.get_db_backend()
         used_value = 0 if size is None else max(int(size), 0)
         free = max(int(db_limit) - used_value, 0)
         size_text = "Unknown" if size is None else get_size(used_value)
         free_text = get_size(free)
-        await rju.edit(script.STATUS_TXT.format(files, total_users, totl_chats, size_text, free_text))
+        status_text = script.STATUS_TXT.format(files, total_users, totl_chats, size_text, free_text)
+        status_text += f"\n 𝙳𝙱 𝙱𝙰𝙲𝙺𝙴𝙽𝙳: <code>{backend}</code>"
+        await rju.edit(status_text)
     else:
         k = await message.reply_text("<b>Sᴏʀʀʏ ᴛʜɪꜱ ᴄᴏᴍᴍᴀɴᴅ ᴏɴʟʏ ᴀᴅᴍɪɴꜱ</b>")        
         await asyncio.sleep(10)

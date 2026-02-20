@@ -1,5 +1,7 @@
 # https://github.com/odysseusmax/animated-lamp/blob/master/bot/database/database.py
 import json
+import shutil
+from pathlib import Path
 import motor.motor_asyncio
 
 from info import (
@@ -14,7 +16,18 @@ from info import (
     SPELL_CHECK_REPLY,
     TURSO_MAX_DB_BYTES,
 )
-from database.sqldb import db_execute, db_fetchall, db_fetchone, get_conn, get_fallback_db_size, libsql_mode, sqldb_enabled
+from database.sqldb import (
+    db_execute,
+    db_fetchall,
+    db_fetchone,
+    get_conn,
+    get_fallback_db_path,
+    get_fallback_db_size,
+    get_sqldb_path,
+    libsql_fallback_active,
+    libsql_mode,
+    sqldb_enabled,
+)
 
 USE_SQLDB = sqldb_enabled()
 USE_LIBSQL = libsql_mode()
@@ -221,6 +234,13 @@ class Database:
         except Exception:
             return []
 
+    async def get_db_backend(self):
+        if not self.use_sql:
+            return "MongoDB"
+        if self.use_libsql:
+            return "SQLite Fallback (Turso unreachable)" if libsql_fallback_active() else "Turso libsql"
+        return "SQLite"
+
     async def get_db_size(self):
         if not self.use_sql:
             return (await self.db.command('dbstats'))['dataSize']
@@ -237,9 +257,13 @@ class Database:
             return int(page_count) * int(page_size)
 
     async def get_db_limit(self):
-        if self.use_libsql:
+        if self.use_libsql and not libsql_fallback_active():
             return int(TURSO_MAX_DB_BYTES)
-        return 512 * 1024 * 1024
+
+        sqlite_path = Path(get_fallback_db_path() if self.use_libsql else (get_sqldb_path() or "bot.db"))
+        base_path = sqlite_path if sqlite_path.exists() else sqlite_path.parent
+        usage = shutil.disk_usage(str(base_path))
+        return int(usage.total)
 
 
 db = Database(DATABASE_URI, DATABASE_NAME)

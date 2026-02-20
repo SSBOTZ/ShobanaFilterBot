@@ -53,6 +53,10 @@ def _fallback_conn() -> sqlite3.Connection:
 
 
 
+def get_fallback_db_path() -> str:
+    return _FALLBACK_SQLITE
+
+
 def get_fallback_db_size() -> int:
     with _fallback_conn() as conn:
         page_count = conn.execute("PRAGMA page_count").fetchone()[0]
@@ -67,6 +71,10 @@ def sqldb_enabled() -> bool:
 def libsql_mode() -> bool:
     db_url = (SQLDB or "").strip()
     return db_url.startswith("libsql://") or db_url.startswith("ws://") or db_url.startswith("wss://")
+
+
+def libsql_fallback_active() -> bool:
+    return libsql_mode() and _libsql_temporarily_disabled()
 
 
 def _require_libsql_client_module():
