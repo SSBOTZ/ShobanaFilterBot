@@ -1,67 +1,112 @@
+import asyncio
+import logging
 import sqlite3
 from pathlib import Path
 from urllib.parse import urlparse
 
 from info import SQLDB, TURSO_AUTH_TOKEN
-import logging
 
 logger = logging.getLogger(__name__)
+
+_LIBSQL_CLIENT = None
+_LIBSQL_LOCK = asyncio.Lock()
 
 
 def sqldb_enabled() -> bool:
     return bool(SQLDB)
 
 
-def _is_remote_libsql(db_url: str) -> bool:
+def libsql_mode() -> bool:
+    db_url = (SQLDB or "").strip()
     return db_url.startswith("libsql://") or db_url.startswith("ws://") or db_url.startswith("wss://")
 
 
-def _require_libsql_client() -> None:
+def _require_libsql_client_module():
     try:
-        import libsql_client  # noqa: F401
+        from libsql_client import create_client  # type: ignore
     except Exception as e:
         raise RuntimeError(
-            "Turso/libsql URL detected, but dependency 'libsql-client' is not installed. "
-            "Please ensure requirements are installed (pip install -r requirements.txt)."
+            "libsql-client is required for Turso/libsql URLs. Install dependencies from requirements.txt."
         ) from e
+    return create_client
 
 
-def _validate_remote_libsql(db_url: str) -> None:
-    if not _is_remote_libsql(db_url):
-        return
+async def _get_libsql_client():
+    global _LIBSQL_CLIENT
+    if _LIBSQL_CLIENT is not None:
+        return _LIBSQL_CLIENT
 
-    if not TURSO_AUTH_TOKEN:
-        logger.warning(
-            "Turso/libsql URL detected but TURSO_AUTH_TOKEN is missing. "
-            "Falling back to local sqlite file for this run."
-        )
-        return
+    async with _LIBSQL_LOCK:
+        if _LIBSQL_CLIENT is not None:
+            return _LIBSQL_CLIENT
+
+        if not TURSO_AUTH_TOKEN:
+            raise RuntimeError("TURSO_AUTH_TOKEN is required when SQLDB uses libsql:// URL.")
+
+        create_client = _require_libsql_client_module()
+        _LIBSQL_CLIENT = create_client(url=SQLDB.strip(), auth_token=TURSO_AUTH_TOKEN)
+        return _LIBSQL_CLIENT
+
+
+async def _libsql_execute(query: str, params=()):
+    client = await _get_libsql_client()
+    params = tuple(params or ())
+
+    # Try common call variants for libsql-client compatibility.
+    try:
+        return await client.execute(query, params)
+    except TypeError:
+        pass
 
     try:
-        _require_libsql_client()
-    except RuntimeError:
-        logger.warning(
-            "libsql-client is not installed in this environment. "
-            "Falling back to local sqlite file for this run."
-        )
-        return
+        return await client.execute(query, args=list(params))
+    except TypeError:
+        pass
 
-    logger.warning(
-        "Remote Turso URL detected. Current DB path uses sqlite-style execution; "
-        "using local sqlite fallback file for runtime stability."
-    )
+    stmt = {"sql": query, "args": list(params)}
+    return await client.execute(stmt)
+
+
+async def db_execute(query: str, params=()):
+    if libsql_mode():
+        return await _libsql_execute(query, params)
+
+    with get_conn() as conn:
+        cur = conn.execute(query, tuple(params or ()))
+        conn.commit()
+        return cur
+
+
+async def db_fetchall(query: str, params=()):
+    if libsql_mode():
+        result = await _libsql_execute(query, params)
+        rows = getattr(result, "rows", []) or []
+        normalized = []
+        for row in rows:
+            if isinstance(row, dict):
+                normalized.append(row)
+            else:
+                # best effort for tuple rows
+                normalized.append(dict(row)) if hasattr(row, "keys") else normalized.append({str(i): v for i, v in enumerate(row)})
+        return normalized
+
+    with get_conn() as conn:
+        cur = conn.execute(query, tuple(params or ()))
+        return [dict(r) for r in cur.fetchall()]
+
+
+async def db_fetchone(query: str, params=()):
+    rows = await db_fetchall(query, params)
+    return rows[0] if rows else None
 
 
 def get_sqldb_path() -> str:
-    db_url = SQLDB.strip()
+    db_url = (SQLDB or "").strip()
     if not db_url:
         return ""
 
-    _validate_remote_libsql(db_url)
-
-    if _is_remote_libsql(db_url):
-        # Runtime-stable fallback path when remote libsql URL is provided.
-        return "data/turso_fallback.db"
+    if libsql_mode():
+        return ""
 
     if db_url.startswith("sqlite:///"):
         return db_url.replace("sqlite:///", "", 1)
@@ -71,13 +116,14 @@ def get_sqldb_path() -> str:
     parsed = urlparse(db_url)
     if parsed.scheme and parsed.scheme != "file":
         raise RuntimeError(
-            f"Unsupported SQLDB scheme '{parsed.scheme}'. Use sqlite file path (e.g. sqlite:///data/bot.db)."
+            f"Unsupported SQLDB scheme '{parsed.scheme}'. Use sqlite file path or libsql:// URL."
         )
-
     return db_url
 
 
 def get_conn() -> sqlite3.Connection:
+    if libsql_mode():
+        raise RuntimeError("get_conn() is not available in libsql mode. Use db_execute/db_fetch* helpers.")
     db_path = get_sqldb_path() or "bot.db"
     path = Path(db_path)
     if path.parent and str(path.parent) != ".":

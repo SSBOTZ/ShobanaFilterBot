@@ -59,7 +59,7 @@
             "required": false
         },
         "SQLDB": {
-            "description": "SQLite DB string (example: sqlite:///data/bot.db). SQL backend currently uses sqlite engine for users/connections/filters.",
+            "description": "SQL DB string. Use sqlite path (sqlite:///data/bot.db) or Turso URL (libsql://your-db.turso.io).",
             "required": false
         },
         "TURSO_DATABASE_URL": {
